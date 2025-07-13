@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FEAR-PASS - Enhanced Password Manager</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.18.9/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+  <style>
+    .sidebar {
+      width: 280px;
+      height: 100vh;
+      overflow-y: auto;
+      transition: all 0.3s;
+    }
+    .content-area {
+      width: calc(100% - 280px);
+      height: calc(100vh - 60px);
+      overflow-y: auto;
+    }
+    @media (max-width: 768px) {
+      .sidebar {
+        position: fixed;
+        width: 0;
+        z-index: 50;
+      }
+      .sidebar.active {
+        width: 280px;
+      }
+      .content-area {
+        width: 100%;
+      }
+    }
+    .entry-card {
+      transition: all 0.2s;
+    }
+    .entry-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background-color: white;
+      padding: 2rem;
+      border-radius: 0.5rem;
+      width: 100%;
+      max-width: 500px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .title-bar {
+      height: 60px;
+      background-color: #3b82f6;
+      color: white;
+    }
+    .dark .modal-content {
+      background-color: #1f2937;
+    }
+    .dark .sidebar {
+      background-color: #111827;
+      color: white;
+    }
+    .dark .content-area {
+      background-color: #1f2937;
+      color: white;
+    }
+    .dark .entry-card {
+      background-color: #111827;
+      color: white;
+      border-color: #374151;
+    }
+    .dark .bg-white {
+      background-color: #111827;
+    }
+    .dark .text-gray-800 {
+      color: white;
+    }
+    .dark .text-gray-500 {
+      color: #9ca3af;
+    }
+    .dark .bg-gray-100 {
+      background-color: #374151;
+    }
+    .dark .bg-gray-200 {
+      background-color: #4b5563;
+    }
+    .dark .border {
+      border-color: #374151;
+    }
+    .dark .bg-blue-100 {
+      background-color: #1e40af;
+    }
+    .dark .text-blue-800 {
+      color: #93c5fd;
+    }
+    .dark .bg-green-100 {
+      background-color: #065f46;
+    }
+    .dark .text-green-700 {
+      color: #6ee7b7;
+    }
+    .dark .bg-red-100 {
+      background-color: #991b1b;
+    }
+    .dark .text-red-700 {
+      color: #fca5a5;
+    }
+    .dark .title-bar {
+      background-color: #1e40af;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const FearPassApp = () => {
+      const [masterPassword, setMasterPassword] = useState('');
+      const [isUnlocked, setIsUnlocked] = useState(false);
+      const [entries, setEntries] = useState([]);
+      const [lastActivityTime, setLastActivityTime] = useState(Date.now());
+      const [inactivityTimeout, setInactivityTimeout] = useState(5 * 60 * 1000); // 5 phút mặc định
+      const [isGoogleDriveConnected, setIsGoogleDriveConnected] = useState(false);
+      const [isSyncing, setIsSyncing] = useState(false);
+
+      const [showConfirmExport, setShowConfirmExport] = useState(false);
+      const [confirmPassword, setConfirmPassword] = useState('');
+      const [confirmError, setConfirmError] = useState('');
+
+      const [newEntry, setNewEntry] = useState({ 
+        website: '', 
+        username: '', 
+        password: '', 
+        icon: 'fa-lock',
+        category: 'Cá Nhân'
+      });
+      const [editEntry, setEditEntry] = useState(null);
+      const [error, setError] = useState('');
+      const [showPassword, setShowPassword] = useState(false);
+      const [passwordStrength, setPasswordStrength] = useState('');
+      const [visiblePasswords, setVisiblePasswords] = useState({});
+      const [copyMessage, setCopyMessage] = useState('');
+      const [searchQuery, setSearchQuery] = useState('');
+      const [customIcons, setCustomIcons] = useState([]);
+      const [categories, setCategories] = useState(['Work', 'Cá Nhân', 'Mạng xã hội']);
+      const [selectedCategory, setSelectedCategory] = useState('All');
+      const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+      const [showAddModal, setShowAddModal] = useState(false);
+      const [darkMode, setDarkMode] = useState(() => {
+        return localStorage.getItem('darkMode') === 'true' || 
+               (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      });
+
+      // Reset thời gian hoạt động
+      const resetInactivityTimer = () => {
+        setLastActivityTime(Date.now());
+      };
+
+      // Kiểm tra hoạt động
+      useEffect(() => {
+        const checkInactivity = setInterval(() => {
+          if (isUnlocked && Date.now() - lastActivityTime > inactivityTimeout) {
+            setIsUnlocked(false);
+            setMasterPassword('');
+            setCopyMessage('Hệ thống đã tự động khóa do không hoạt động');
+          }
+        }, 1000);
+
+        return () => clearInterval(checkInactivity);
+      }, [isUnlocked, lastActivityTime, inactivityTimeout]);
+
+      // Theo dõi các tương tác của người dùng
+      useEffect(() => {
+        const events = ['mousemove', 'keydown', 'click', 'scroll'];
+        
+        const handleActivity = () => resetInactivityTimer();
+        
+        events.forEach(event => {
+          window.addEventListener(event, handleActivity);
+        });
+        
+        return () => {
+          events.forEach(event => {
+            window.removeEventListener(event, handleActivity);
+          });
+        };
+      }, []);
+
+      // Áp dụng dark mode
+      useEffect(() => {
+        if (darkMode) {
+          document.body.classList.add('dark');
+        } else {
+          document.body.classList.remove('dark');
+        }
+        localStorage.setItem('darkMode', darkMode);
+      }, [darkMode]);
+
+      // Khởi tạo Google Drive API
+      const initGoogleDrive = () => {
+        return new Promise((resolve) => {
+          const script = document.createElement('script');
+          script.src = 'https://apis.google.com/js/api.js';
+          script.onload = () => {
+            window.gapi.load('client:auth2', () => {
+              window.gapi.client.init({
+                apiKey: 'AIzaSyDPuCh7LByNCTdAPbKyaSXsgur0NojTg4g',
+                clientId: '88417575389-2mf9l5kdp8ls2iegrtbrtu7sjklhug4o.apps.googleusercontent.com',
+                discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+                scope: 'https://www.googleapis.com/auth/drive.file'
+              }).then(() => {
+                resolve(true);
+              });
+            });
+          };
+          document.body.appendChild(script);
+        });
+      };
+
+      // Đăng nhập Google Drive
+      const handleGoogleDriveLogin = async () => {
+        try {
+          await initGoogleDrive();
+          const authInstance = window.gapi.auth2.getAuthInstance();
+          const isSignedIn = authInstance.isSignedIn.get();
+          
+          if (!isSignedIn) {
+            await authInstance.signIn();
+          }
+          
+          setIsGoogleDriveConnected(true);
+          setCopyMessage('Đã kết nối với Google Drive');
+        } catch (error) {
+          setError('Lỗi kết nối Google Drive: ' + error.message);
+        }
+      };
+
+      // Đồng bộ lên Google Drive
+      const syncToGoogleDrive = async () => {
+        setIsSyncing(true);
+        try {
+          const encryptedData = localStorage.getItem('fear-pass-vault');
+          const fileName = 'fear-pass-backup.json';
+          
+          // Kiểm tra file có tồn tại chưa
+          const response = await window.gapi.client.drive.files.list({
+            q: `name='${fileName}' and trashed=false`,
+            spaces: 'appDataFolder'
+          });
+          
+          let fileId = null;
+          if (response.result.files.length > 0) {
+            fileId = response.result.files[0].id;
+          }
+          
+          // Tạo hoặc cập nhật file
+          const fileContent = new Blob([encryptedData], { type: 'application/json' });
+          const metadata = {
+            name: fileName,
+            mimeType: 'application/json',
+            parents: ['appDataFolder']
+          };
+          
+          const formData = new FormData();
+          formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+          formData.append('file', fileContent);
+          
+          if (fileId) {
+            await window.gapi.client.drive.files.update({
+              fileId: fileId,
+              uploadType: 'multipart'
+            }, formData);
+          } else {
+            await window.gapi.client.drive.files.create({
+              uploadType: 'multipart'
+            }, formData);
+          }
+          
+          setCopyMessage('Đã đồng bộ dữ liệu lên Google Drive');
+        } catch (error) {
+          setError('Lỗi đồng bộ: ' + error.message);
+        } finally {
+          setIsSyncing(false);
+        }
+      };
+
+      // Đồng bộ từ Google Drive
+      const syncFromGoogleDrive = async () => {
+        setIsSyncing(true);
+        try {
+          const response = await window.gapi.client.drive.files.list({
+            q: "name='fear-pass-backup.json' and trashed=false",
+            spaces: 'appDataFolder'
+          });
+          
+          if (response.result.files.length === 0) {
+            setError('Không tìm thấy file backup trên Google Drive');
+            return;
+          }
+          
+          const fileId = response.result.files[0].id;
+          const fileResponse = await window.gapi.client.drive.files.get({
+            fileId: fileId,
+            alt: 'media'
+          });
+          
+          const encryptedData = fileResponse.body;
+          localStorage.setItem('fear-pass-vault', encryptedData);
+          
+          // Giải mã để kiểm tra
+          try {
+            const decrypted = CryptoJS.AES.decrypt(encryptedData, masterPassword).toString(CryptoJS.enc.Utf8);
+            JSON.parse(decrypted);
+            
+            setCopyMessage('Đã đồng bộ dữ liệu từ Google Drive');
+            window.location.reload(); // Tải lại để áp dụng dữ liệu mới
+          } catch (e) {
+            setError('Mật khẩu chính không khớp với dữ liệu từ Google Drive');
+          }
+        } catch (error) {
+          setError('Lỗi đồng bộ: ' + error.message);
+        } finally {
+          setIsSyncing(false);
+        }
+      };
+
+      // Kiểm tra độ mạnh mật khẩu
+      const checkPasswordStrength = (password) => {
+        if (password.length < 8) return 'Weak: Mật khẩu phải trên 8 ký tự.';
+        if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
+          return 'Medium: Include uppercase, lowercase, and numbers';
+        }
+        return 'Strong';
+      };
+
+      // Load data từ localStorage
+      useEffect(() => {
+        const encryptedData = localStorage.getItem('fear-pass-vault');
+        if (encryptedData && masterPassword) {
+          try {
+            const decrypted = CryptoJS.AES.decrypt(encryptedData, masterPassword).toString(CryptoJS.enc.Utf8);
+            const parsedEntries = JSON.parse(decrypted) || [];
+            
+            const updatedEntries = parsedEntries.map(entry => ({
+              ...entry,
+              icon: entry.icon || 'fa-lock',
+              category: entry.category || 'Cá Nhân'
+            }));
+            
+            setEntries(updatedEntries);
+            
+            const custom = updatedEntries
+              .filter(entry => entry.icon.startsWith('data:image'))
+              .map(entry => ({ name: `Custom (${entry.website})`, data: entry.icon }));
+            setCustomIcons(custom);
+            
+            const entryCategories = [
+              ...new Set(updatedEntries.map(e => e.category).filter(Boolean))
+            ];
+            setCategories(prev => [...new Set([...prev, ...entryCategories])]);
+            
+            setError('');
+          } catch (e) {
+            // setError('Invalid master password or corrupted data');
+          }
+        }
+      }, [masterPassword, isUnlocked]);
+
+      // Lưu data vào localStorage
+      const saveVault = (data) => {
+        try {
+          const entriesWithCategory = data.map(entry => ({
+            ...entry,
+            icon: entry.icon || 'fa-lock',
+            category: entry.category || 'Cá Nhân'
+          }));
+          
+          const encrypted = CryptoJS.AES.encrypt(
+            JSON.stringify(entriesWithCategory), 
+            masterPassword
+          ).toString();
+          localStorage.setItem('fear-pass-vault', encrypted);
+          return true;
+        } catch (e) {
+          console.error('Error saving vault:', e);
+          setError('Failed to save vault: ' + e.message);
+          return false;
+        }
+      };
+
+      // Mở khóa vault
+      const handleUnlock = () => {
+        if (!masterPassword) {
+          setError('Please enter a master password');
+          return;
+        }
+        const strength = checkPasswordStrength(masterPassword);
+        setPasswordStrength(strength);
+        if (strength.includes('Weak')) {
+          setError(strength);
+          return;
+        }
+        setIsUnlocked(true);
+        resetInactivityTimer();
+        setError('');
+      };
+
+      // Xử lý upload file
+      const handleFileUpload = (e, isEdit = false) => {
+        const file = e.target.files[0];
+        if (!file || !['image/svg+xml', 'image/png'].includes(file.type)) {
+          setError('Please upload a valid SVG or PNG file');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const base64 = event.target.result;
+          if (isEdit) {
+            setEditEntry((prev) => ({ ...prev, icon: base64 }));
+            setCustomIcons((prev) => [...prev, { name: `Custom (${editEntry.website || 'New'})`, data: base64 }]);
+          } else {
+            setNewEntry((prev) => ({ ...prev, icon: base64 }));
+            setCustomIcons((prev) => [...prev, { name: `Custom (${newEntry.website || 'New'})`, data: base64 }]);
+          }
+          setError('');
+        };
+        reader.readAsDataURL(file);
+      };
+
+      // Thêm entry mới
+      const handleAddEntry = () => {
+        if (!newEntry.website || !newEntry.username || !newEntry.password) {
+          setError('All fields are required');
+          return;
+        }
+        
+        try {
+          const entryToAdd = {
+            ...newEntry,
+            icon: newEntry.icon || 'fa-lock',
+            category: newEntry.category || 'Cá Nhân'
+          };
+
+          const updatedEntries = [...entries, entryToAdd];
+          setEntries(updatedEntries);
+          
+          const saveSuccess = saveVault(updatedEntries);
+          if (!saveSuccess) {
+            throw new Error('Failed to save to vault');
+          }
+
+          setNewEntry({ 
+            website: '', 
+            username: '', 
+            password: '', 
+            icon: 'fa-lock',
+            category: selectedCategory === 'All' ? 'Cá Nhân' : selectedCategory
+          });
+          
+          setError('');
+          setShowAddModal(false);
+          setCopyMessage('Entry added successfully!');
+          setTimeout(() => setCopyMessage(''), 2000);
+        } catch (err) {
+          console.error('Error adding entry:', err);
+          setError('Failed to add entry: ' + err.message);
+        }
+      };
+
+      // Chỉnh sửa entry
+      const handleEditEntry = (index) => {
+        setEditEntry({ index, ...entries[index] });
+      };
+
+      // Lưu entry đã chỉnh sửa
+      const handleSaveEdit = () => {
+        if (!editEntry.website || !editEntry.username || !editEntry.password) {
+          setError('All fields are required');
+          return;
+        }
+        
+        try {
+          const updatedEntries = [...entries];
+          updatedEntries[editEntry.index] = {
+            website: editEntry.website,
+            username: editEntry.username,
+            password: editEntry.password,
+            icon: editEntry.icon || 'fa-lock',
+            category: editEntry.category || 'Cá Nhân'
+          };
+          
+          setEntries(updatedEntries);
+          
+          const saveSuccess = saveVault(updatedEntries);
+          if (!saveSuccess) {
+            throw new Error('Failed to save to vault');
+          }
+
+          setEditEntry(null);
+          setError('');
+          setCopyMessage('Entry updated successfully!');
+          setTimeout(() => setCopyMessage(''), 2000);
+        } catch (err) {
+          console.error('Error saving edit:', err);
+          setError('Failed to save changes: ' + err.message);
+        }
+      };
+
+      // Xử lý thay đổi input
+      const handleInputChange = (e, isEdit = false) => {
+        const { name, value } = e.target;
+        if (isEdit) {
+          setEditEntry((prev) => ({ ...prev, [name]: value }));
+        } else {
+          setNewEntry((prev) => ({ ...prev, [name]: value }));
+        }
+      };
+
+      // Xóa entry
+      const handleDeleteEntry = (index) => {
+        if (!window.confirm('Are you sure you want to delete this entry?')) {
+          return;
+        }
+        
+        try {
+          const updatedEntries = entries.filter((_, i) => i !== index);
+          setEntries(updatedEntries);
+          
+          const saveSuccess = saveVault(updatedEntries);
+          if (!saveSuccess) {
+            throw new Error('Failed to save to vault');
+          }
+
+          setVisiblePasswords((prev) => {
+            const updated = { ...prev };
+            delete updated[index];
+            return updated;
+          });
+          
+          setCopyMessage('Entry deleted successfully!');
+          setTimeout(() => setCopyMessage(''), 2000);
+        } catch (err) {
+          console.error('Error deleting entry:', err);
+          setError('Failed to delete entry: ' + err.message);
+        }
+      };
+
+      // Xuất vault
+      const proceedExportVault = () => {
+        try {
+          const encrypted = CryptoJS.AES.encrypt(JSON.stringify(entries), masterPassword).toString();
+          const blob = new Blob([encrypted], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'fear-pass-vault.json';
+          a.click();
+          URL.revokeObjectURL(url);
+          setConfirmPassword('');
+          setConfirmError('');
+          setShowConfirmExport(false);
+        } catch (err) {
+          console.error('Error exporting vault:', err);
+          setError('Failed to export vault: ' + err.message);
+        }
+      };
+
+      const handleConfirmExport = () => {
+        if (confirmPassword !== masterPassword) {
+          setConfirmError('Mật khẩu không đúng');
+          return;
+        }
+        proceedExportVault();
+      };
+
+      // Nhập vault
+      const handleImportVault = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        if (!window.confirm('Importing will overwrite your current vault. Continue?')) {
+          return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const encrypted = event.target.result;
+            const decrypted = CryptoJS.AES.decrypt(encrypted, masterPassword).toString(CryptoJS.enc.Utf8);
+            const importedEntries = JSON.parse(decrypted);
+            
+            const updatedEntries = importedEntries.map(entry => ({
+              ...entry,
+              icon: entry.icon || 'fa-lock',
+              category: entry.category || 'Cá Nhân'
+            }));
+            
+            setEntries(updatedEntries);
+            
+            const custom = updatedEntries
+              .filter(entry => entry.icon.startsWith('data:image'))
+              .map(entry => ({ name: `Custom (${entry.website})`, data: entry.icon }));
+            setCustomIcons(custom);
+            
+            const importedCategories = [
+              ...new Set(importedEntries.map(e => e.category).filter(Boolean))
+            ];
+            setCategories(prev => [...new Set([...prev, ...importedCategories])]);
+            
+            saveVault(updatedEntries);
+            setError('Vault imported successfully');
+          } catch (err) {
+            console.error('Error importing vault:', err);
+            setError('Failed to import vault: Invalid file or master password');
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      // Hiển thị/ẩn mật khẩu
+      const togglePasswordVisibility = (index) => {
+        setVisiblePasswords((prev) => ({
+          ...prev,
+          [index]: !prev[index],
+        }));
+      };
+
+      // Sao chép vào clipboard
+      const handleCopy = (text, field) => {
+        navigator.clipboard.writeText(text).then(() => {
+          setCopyMessage(`Copied ${field} to clipboard!`);
+          setTimeout(() => setCopyMessage(''), 2000);
+        });
+      };
+
+      // Chỉnh sửa category
+      const handleEditCategory = (oldCategory) => {
+        if (oldCategory === 'Cá Nhân') {
+          alert('Không thể xóa thư mục mặc định "Cá Nhân" !!');
+          return;
+        }
+        
+        const newCategory = prompt('Nhập tên mới cho thư mục:', oldCategory);
+        if (newCategory && newCategory !== oldCategory) {
+          // Cập nhật danh sách categories
+          const updatedCategories = categories.map(cat => 
+            cat === oldCategory ? newCategory : cat
+          );
+          setCategories(updatedCategories);
+          
+          // Cập nhật các entry có category cũ
+          const updatedEntries = entries.map(entry => 
+            entry.category === oldCategory ? {...entry, category: newCategory} : entry
+          );
+          setEntries(updatedEntries);
+          saveVault(updatedEntries);
+          
+          // Cập nhật selected category nếu đang chọn category bị sửa
+          if (selectedCategory === oldCategory) {
+            setSelectedCategory(newCategory);
+          }
+        }
+      };
+
+      // Xóa category
+      const handleDeleteCategory = (categoryToDelete) => {
+        if (categoryToDelete === 'Cá Nhân') {
+          alert('Không thể xóa thư mục mặc định "Cá Nhân" !!');
+          return;
+        }
+        
+        if (!window.confirm(`Xóa thư mục "${categoryToDelete}"? Tài khoản sẽ được đưa về thư mục "Cá Nhân".`)) {
+          return;
+        }
+        
+        // Cập nhật danh sách categories
+        const updatedCategories = categories.filter(cat => cat !== categoryToDelete);
+        setCategories(updatedCategories);
+        
+        // Cập nhật các entry có category bị xóa
+        const updatedEntries = entries.map(entry => 
+          entry.category === categoryToDelete ? {...entry, category: 'Cá Nhân'} : entry
+        );
+        setEntries(updatedEntries);
+        saveVault(updatedEntries);
+        
+        // Reset selected category nếu đang chọn category bị xóa
+        if (selectedCategory === categoryToDelete) {
+          setSelectedCategory('All');
+        }
+      };
+
+      // Thêm category mới
+      const addNewCategory = () => {
+        const categoryName = prompt('Nhập tên thư mục mới:');
+        if (categoryName && !categories.includes(categoryName)) {
+          setCategories([...categories, categoryName]);
+        }
+      };
+
+      // Lọc entries
+      const filteredEntries = entries.filter((entry) => {
+        const matchesSearch = 
+          entry.website.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          entry.username.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesCategory = 
+          selectedCategory === 'All' || entry.category === selectedCategory;
+        return matchesSearch && matchesCategory;
+      });
+
+      // Font Awesome icons
+      const fontAwesomeIcons = [
+        { name: 'Lock', class: 'fa-lock' },
+        { name: 'User', class: 'fa-user' },
+        { name: 'Globe', class: 'fa-globe' },
+        { name: 'Key', class: 'fa-key' },
+        { name: 'Shield', class: 'fa-shield-alt' },
+        { name: 'Laptop', class: 'fa-laptop' },
+        { name: 'Credit Card', class: 'fa-credit-card' },
+        { name: 'Envelope', class: 'fa-envelope' },
+      ];
+
+      // Toggle dark mode
+      const toggleDarkMode = () => {
+        setDarkMode(!darkMode);
+      };
+
+      // Màn hình khóa
+      if (!isUnlocked) {
+        return (
+          <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-md">
+              <div className="flex justify-between items-center mb-4">
+                <h1 className="text-2xl font-bold dark:text-white">FEAR-Password Manager</h1>
+                <button
+                  onClick={toggleDarkMode}
+                  className="text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-white"
+                >
+                  <i className={`fas ${darkMode ? 'fa-sun' : 'fa-moon'}`}></i>
+                </button>
+              </div>
+              <input
+                type="password"
+                value={masterPassword}
+                onChange={(e) => setMasterPassword(e.target.value)}
+                placeholder="Nhập mã bảo mật"
+                className="w-full p-2 mb-4 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+              {passwordStrength && (
+                <p className={`mb-4 ${passwordStrength.includes('Weak') ? 'text-red-500' : passwordStrength.includes('Medium') ? 'text-yellow-500' : 'text-green-500'}`}>
+                  {passwordStrength}
+                </p>
+              )}
+              {error && <p className="text-red-500 mb-4">{error}</p>}
+              <button
+                onClick={handleUnlock}
+                className="w-full bg-blue-500 hover:bg-blue-600 text-white p-2 rounded transition-colors"
+              >
+                TRUY CẬP
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      // Màn hình chỉnh sửa
+      if (editEntry) {
+        return (
+          <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-md">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold dark:text-white">Sửa tài khoản</h2>
+                <button
+                  onClick={toggleDarkMode}
+                  className="text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-white"
+                >
+                  <i className={`fas ${darkMode ? 'fa-sun' : 'fa-moon'}`}></i>
+                </button>
+              </div>
+              <input
+                type="text"
+                name="website"
+                value={editEntry.website}
+                onChange={(e) => handleInputChange(e, true)}
+                placeholder="Website"
+                className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+              <input
+                type="text"
+                name="username"
+                value={editEntry.username}
+                onChange={(e) => handleInputChange(e, true)}
+                placeholder="Username"
+                className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  name="password"
+                  value={editEntry.password}
+                  onChange={(e) => handleInputChange(e, true)}
+                  placeholder="Password"
+                  className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                />
+                <button
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2 top-2 text-gray-500 dark:text-gray-400"
+                >
+                  <i className={showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'}></i>
+                </button>
+              </div>
+              <select
+                name="category"
+                value={editEntry.category}
+                onChange={(e) => handleInputChange(e, true)}
+                className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              >
+                {categories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+              <select
+                name="icon"
+                value={editEntry.icon}
+                onChange={(e) => handleInputChange(e, true)}
+                className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              >
+                {fontAwesomeIcons.map((icon) => (
+                  <option key={icon.class} value={icon.class}>
+                    {icon.name}
+                  </option>
+                ))}
+                {customIcons.map((icon, index) => (
+                  <option key={`custom-${index}`} value={icon.data}>
+                    {icon.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="file"
+                accept="image/svg+xml,image/png"
+                onChange={(e) => handleFileUpload(e, true)}
+                className="w-full p-2 mb-4 dark:text-white"
+              />
+              {error && <p className="text-red-500 mb-4">{error}</p>}
+              <div className="flex space-x-2">
+                <button
+                  onClick={handleSaveEdit}
+                  className="w-full bg-green-500 hover:bg-green-600 text-white p-2 rounded transition-colors"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setEditEntry(null)}
+                  className="w-full bg-gray-500 hover:bg-gray-600 text-white p-2 rounded transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // Màn hình chính
+      return (
+        <div className="flex flex-col h-screen">
+          {/* Title Bar */}
+          <div className="title-bar dark:title-bar flex items-center justify-between px-4 shadow-md">
+            <div className="flex items-center">
+              <i className="fas fa-lock mr-3 text-xl"></i>
+              <h1 className="text-xl font-bold">FEAR-Password Manager</h1>
+            </div>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={toggleDarkMode}
+                className="text-white hover:text-gray-200"
+                title={darkMode ? 'Light mode' : 'Dark mode'}
+              >
+                <i className={`fas ${darkMode ? 'fa-sun' : 'fa-moon'}`}></i>
+              </button>
+              {isGoogleDriveConnected ? (
+                <>
+                  <button
+                    onClick={syncToGoogleDrive}
+                    disabled={isSyncing}
+                    className="text-white hover:text-gray-200"
+                    title="Đồng bộ lên Google Drive"
+                  >
+                    <i className={`fas fa-cloud-upload-alt ${isSyncing ? 'animate-pulse' : ''}`}></i>
+                  </button>
+                  <button
+                    onClick={syncFromGoogleDrive}
+                    disabled={isSyncing}
+                    className="text-white hover:text-gray-200"
+                    title="Đồng bộ từ Google Drive"
+                  >
+                    <i className={`fas fa-cloud-download-alt ${isSyncing ? 'animate-pulse' : ''}`}></i>
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={handleGoogleDriveLogin}
+                  className="text-white hover:text-gray-200"
+                  title="Kết nối Google Drive"
+                >
+                  <i className="fab fa-google-drive"></i>
+                </button>
+              )}
+              <button
+                onClick={() => setShowConfirmExport(true)}
+                className="text-white hover:text-gray-200"
+                title="Export Vault"
+              >
+                <i className="fas fa-file-export"></i>
+              </button>
+              <label className="text-white hover:text-gray-200 cursor-pointer"
+                     title="Import Vault">
+                <i className="fas fa-file-import"></i>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportVault}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="flex flex-1">
+            {/* Sidebar */}
+            <div className={`sidebar bg-white dark:bg-gray-800 shadow-lg ${isSidebarOpen ? 'active' : ''}`}>
+              <div className="p-4 border-b dark:border-gray-700 flex justify-between items-center bg-blue-500 dark:bg-blue-600 text-white">
+                <h2 className="text-xl font-semibold">Thư Mục</h2>
+                <button 
+                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                  className="md:hidden text-white"
+                >
+                  <i className={`fas ${isSidebarOpen ? 'fa-times' : 'fa-bars'}`}></i>
+                </button>
+              </div>
+              
+              <div className="p-4">
+                <button
+                  onClick={addNewCategory}
+                  className="w-full bg-green-500 hover:bg-green-600 text-white p-2 rounded mb-4 transition-colors"
+                >
+                  <i className="fas fa-plus mr-2"></i> Thư Mục Mới
+                </button>
+                
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setSelectedCategory('All')}
+                    className={`w-full text-left p-3 rounded flex items-center transition-colors ${
+                      selectedCategory === 'All' ? 
+                      'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100 font-medium' : 
+                      'hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    <i className="fas fa-layer-group mr-3 text-blue-500 dark:text-blue-400"></i> 
+                    <span>Tất Cả</span>
+                    <span className="ml-auto bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded-full text-xs">
+                      {entries.length}
+                    </span>
+                  </button>
+                  
+                  {categories.map((category) => (
+                    <div key={category} className="group relative">
+                      <button
+                        onClick={() => setSelectedCategory(category)}
+                        className={`w-full text-left p-3 rounded flex items-center transition-colors ${
+                          selectedCategory === category ? 
+                          'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100 font-medium' : 
+                          'hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        <i className="fas fa-folder mr-3 text-yellow-500 dark:text-yellow-400"></i> 
+                        <span className="truncate">{category}</span>
+                        <span className="ml-auto bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded-full text-xs">
+                          {entries.filter(e => e.category === category).length}
+                        </span>
+                      </button>
+                      
+                      <div className="absolute right-2 top-2 hidden group-hover:flex space-x-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditCategory(category);
+                          }}
+                          className="p-1 text-gray-500 hover:text-blue-500 dark:text-gray-400 dark:hover:text-blue-400"
+                          title="Sửa"
+                        >
+                          <i className="fas fa-edit text-xs"></i>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteCategory(category);
+                          }}
+                          className="p-1 text-gray-500 hover:text-red-500 dark:text-gray-400 dark:hover:text-red-400"
+                          title="Xóa"
+                        >
+                          <i className="fas fa-trash text-xs"></i>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Cài đặt bảo mật */}
+                <div className="p-4 border-t dark:border-gray-700">
+                  <h3 className="font-medium mb-2 dark:text-white">Cài đặt bảo mật</h3>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm dark:text-gray-300">Tự động khóa sau:</span>
+                    <select
+                      value={inactivityTimeout / (60 * 1000)}
+                      onChange={(e) => setInactivityTimeout(Number(e.target.value) * 60 * 1000)}
+                      className="bg-gray-100 dark:bg-gray-700 rounded p-1 text-sm"
+                    >
+                      <option value="1">1 phút</option>
+                      <option value="5">5 phút</option>
+                      <option value="15">15 phút</option>
+                      <option value="30">30 phút</option>
+                      <option value="60">1 giờ</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Main Content */}
+            <div className="content-area bg-gray-50 dark:bg-gray-900 p-4">
+              <div className="max-w-6xl mx-auto">
+                <div className="flex justify-between items-center mb-6">
+                  <h1 className="text-2xl font-bold dark:text-white">
+                    {selectedCategory === 'All' ? 'Tất Cả' : selectedCategory}
+                  </h1>
+                  <div className="flex items-center space-x-2">
+                    <button 
+                      onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                      className="md:hidden bg-gray-200 dark:bg-gray-700 p-2 rounded"
+                    >
+                      <i className="fas fa-bars dark:text-white"></i>
+                    </button>
+                    <button
+                      onClick={() => setShowAddModal(true)}
+                      className="bg-green-500 hover:bg-green-600 text-white p-2 rounded transition-colors"
+                    >
+                      <i className="fas fa-plus"></i> Thêm tài khoản
+                    </button>
+                  </div>
+                </div>
+
+                {copyMessage && (
+                  <div className="mb-4 p-2 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-100 rounded text-center">
+                    {copyMessage}
+                  </div>
+                )}
+
+                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow dark:shadow-gray-700">
+                  <h2 className="text-xl font-semibold dark:text-white mb-2">Kho tài khoản</h2>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Tìm tài khoản..."
+                    className="w-full p-2 mb-4 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  />
+                  
+                  {filteredEntries.length === 0 ? (
+                    <p className="text-gray-500 dark:text-gray-400 text-center py-4">Không tìm thấy thư mục</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {filteredEntries.map((entry, index) => (
+                        <div key={index} className="entry-card border dark:border-gray-700 rounded-lg p-4 dark:bg-gray-700">
+                          <div className="flex items-center mb-2">
+                            {entry.icon.startsWith('data:image') ? (
+                              <img src={entry.icon} alt="Icon" className="w-6 h-6 mr-2" />
+                            ) : (
+                              <i className={`fas ${entry.icon} mr-2 text-blue-500 dark:text-blue-400`}></i>
+                            )}
+                            <h3 className="font-semibold dark:text-white">{entry.website}</h3>
+                          </div>
+                          <div className="mb-2">
+                            <label className="text-sm text-gray-500 dark:text-gray-400">Username:</label>
+                            <div className="flex items-center">
+                              <span className="truncate dark:text-white">{entry.username}</span>
+                              <button
+                                onClick={() => handleCopy(entry.username, 'username')}
+                                className="ml-2 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                              >
+                                <i className="fas fa-copy"></i>
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mb-3">
+                            <label className="text-sm text-gray-500 dark:text-gray-400">Password:</label>
+                            <div className="flex items-center">
+                              <span className="dark:text-white">
+                                {visiblePasswords[index] ? entry.password : '••••••••'}
+                              </span>
+                              <div className="ml-2">
+                                <button
+                                  onClick={() => togglePasswordVisibility(index)}
+                                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 mr-2"
+                                >
+                                  <i className={visiblePasswords[index] ? 'fas fa-eye-slash' : 'fas fa-eye'}></i>
+                                </button>
+                                <button
+                                  onClick={() => handleCopy(entry.password, 'password')}
+                                  className="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                >
+                                  <i className="fas fa-copy"></i>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="bg-gray-100 dark:bg-gray-600 px-2 py-1 rounded text-sm dark:text-white">
+                              {entry.category}
+                            </span>
+                            <div>
+                              <button
+                                onClick={() => handleEditEntry(index)}
+                                className="text-yellow-500 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 mr-2"
+                              >
+                                <i className="fas fa-edit"></i>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteEntry(index)}
+                                className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                              >
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Add New Entry Modal */}
+          {showAddModal && (
+            <div className="modal-overlay">
+              <div className="modal-content">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold dark:text-white">Tài Khoản Mới</h2>
+                  <button
+                    onClick={() => {
+                      setShowAddModal(false);
+                      setError('');
+                    }}
+                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                  >
+                    <i className="fas fa-times"></i>
+                  </button>
+                </div>
+                
+                <input
+                  type="text"
+                  name="website"
+                  value={newEntry.website}
+                  onChange={handleInputChange}
+                  placeholder="Website"
+                  className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                />
+                <input
+                  type="text"
+                  name="username"
+                  value={newEntry.username}
+                  onChange={handleInputChange}
+                  placeholder="Username"
+                  className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    name="password"
+                    value={newEntry.password}
+                    onChange={handleInputChange}
+                    placeholder="Password"
+                    className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  />
+                  <button
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-2 top-2 text-gray-500 dark:text-gray-400"
+                  >
+                    <i className={showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'}></i>
+                  </button>
+                </div>
+                <select
+                  name="category"
+                  value={newEntry.category}
+                  onChange={handleInputChange}
+                  className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                >
+                  {categories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  name="icon"
+                  value={newEntry.icon}
+                  onChange={handleInputChange}
+                  className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                >
+                  {fontAwesomeIcons.map((icon) => (
+                    <option key={icon.class} value={icon.class}>
+                      {icon.name}
+                    </option>
+                  ))}
+                  {customIcons.map((icon, index) => (
+                    <option key={`custom-${index}`} value={icon.data}>
+                      {icon.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="file"
+                  accept="image/svg+xml,image/png"
+                  onChange={handleFileUpload}
+                  className="w-full p-2 mb-4 dark:text-white"
+                />
+                {error && <p className="text-red-500 mb-4">{error}</p>}
+                <button
+                  onClick={handleAddEntry}
+                  className="w-full bg-green-500 hover:bg-green-600 text-white p-2 rounded transition-colors"
+                >
+                  Thêm
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Confirm Export Modal */}
+          {showConfirmExport && (
+            <div className="modal-overlay">
+              <div className="modal-content">
+                <h2 className="text-xl font-semibold dark:text-white mb-4">Xác minh mật khẩu</h2>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Nhập lại mật khẩu chính"
+                  className="w-full p-2 mb-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                />
+                {confirmError && (
+                  <p className="text-red-500 mb-2">{confirmError}</p>
+                )}
+                <div className="flex space-x-2">
+                  <button
+                    onClick={handleConfirmExport}
+                    className="w-full bg-blue-500 hover:bg-blue-600 text-white p-2 rounded"
+                  >
+                    Xác nhận & Tải xuống
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowConfirmExport(false);
+                      setConfirmPassword('');
+                      setConfirmError('');
+                    }}
+                    className="w-full bg-gray-500 hover:bg-gray-600 text-white p-2 rounded"
+                  >
+                    Hủy
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<FearPassApp />);
+  </script>
+</body>
+</html>
