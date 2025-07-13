@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FEAR-PASS - Enhanced Password Manager</title>
+  <title>FE4R-PASS - Enhanced Password Manager</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.18.9/babel.min.js"></script>
@@ -256,7 +256,7 @@
         setIsSyncing(true);
         try {
           const encryptedData = localStorage.getItem('fear-pass-vault');
-          const fileName = 'fear-pass-backup.json';
+          const fileName = 'fe4r-pass-backup.json';
           
           // Kiểm tra file có tồn tại chưa
           const response = await window.gapi.client.drive.files.list({
@@ -305,7 +305,7 @@
         setIsSyncing(true);
         try {
           const response = await window.gapi.client.drive.files.list({
-            q: "name='fear-pass-backup.json' and trashed=false",
+            q: "name='fe4r-pass-backup.json' and trashed=false",
             spaces: 'appDataFolder'
           });
           
@@ -569,7 +569,7 @@
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = 'fear-pass-vault.json';
+          a.download = 'fe4r-pass-vault.json';
           a.click();
           URL.revokeObjectURL(url);
           setConfirmPassword('');
@@ -747,7 +747,7 @@
           <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
             <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-md">
               <div className="flex justify-between items-center mb-4">
-                <h1 className="text-2xl font-bold dark:text-white">FEAR-Password Manager</h1>
+                <h1 className="text-2xl font-bold dark:text-white">FE4R-Password Manager</h1>
                 <button
                   onClick={toggleDarkMode}
                   className="text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-white"
@@ -887,7 +887,7 @@
           <div className="title-bar dark:title-bar flex items-center justify-between px-4 shadow-md">
             <div className="flex items-center">
               <i className="fas fa-lock mr-3 text-xl"></i>
-              <h1 className="text-xl font-bold">FEAR-Password Manager</h1>
+              <h1 className="text-xl font-bold">FE4R-Password Manager</h1>
             </div>
             <div className="flex items-center space-x-4">
               <button
